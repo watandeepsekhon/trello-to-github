@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import { TrelloParser } from './parser.js';
 import { InteractiveMapper } from './mapper.js';
 import { TrelloImporter } from './importer.js';
+import { ConfigManager } from './config.js';
 import type { ImportConfig } from './types.js';
 
 const program = new Command();
@@ -38,16 +39,33 @@ program
       console.log(`  • Labels: ${stats.totalLabels}`);
       console.log('');
 
-      // Interactive column mapping
-      const lists = parser.getLists();
-      const listMappings = await InteractiveMapper.mapLists(lists);
+      // Check for saved config
+      const savedConfig = await ConfigManager.findConfig(trelloFile, options.repo);
+      let listMappings;
+      let epicStrategy;
 
-      // Choose epic strategy
-      const hasEpics = listMappings.some(m => m.isEpic);
-      const epicStrategy = await InteractiveMapper.chooseEpicStrategy(hasEpics);
+      if (savedConfig) {
+        console.log(chalk.cyan('💡 Found a saved configuration from ' + new Date(savedConfig.savedAt).toLocaleString() + '\n'));
+        const useSaved = await InteractiveMapper.askToUseSavedConfig();
+
+        if (useSaved) {
+          listMappings = savedConfig.listMappings;
+          epicStrategy = savedConfig.epicStrategy;
+          console.log(chalk.gray('Using saved configuration\n'));
+        }
+      }
+
+      // If no saved config or user declined, do interactive mapping
+      if (!listMappings || !epicStrategy) {
+        const lists = parser.getLists();
+        listMappings = await InteractiveMapper.mapLists(lists);
+
+        const hasEpics = listMappings.some(m => m.isEpic);
+        epicStrategy = await InteractiveMapper.chooseEpicStrategy(hasEpics);
+      }
 
       // Show summary and confirm
-      const confirmed = await InteractiveMapper.confirmMappings(
+      const { confirmed, saveConfig } = await InteractiveMapper.confirmMappings(
         listMappings,
         epicStrategy
       );
@@ -55,6 +73,17 @@ program
       if (!confirmed) {
         console.log(chalk.yellow('\n⚠️  Import cancelled by user\n'));
         process.exit(0);
+      }
+
+      // Save config if requested
+      if (saveConfig) {
+        await ConfigManager.saveConfig({
+          trelloFilePath: trelloFile,
+          githubRepo: options.repo,
+          githubProject: options.project,
+          listMappings,
+          epicStrategy,
+        });
       }
 
       // Create import config
@@ -70,15 +99,6 @@ program
       // Run import
       const importer = new TrelloImporter(parser, config);
       const result = await importer.import();
-
-      // Ask to save config
-      if (!options.dryRun) {
-        const shouldSave = await InteractiveMapper.askToSaveConfig();
-        if (shouldSave) {
-          // TODO: Save config to file
-          console.log(chalk.gray('\n💾 Configuration saved for future use\n'));
-        }
-      }
 
       // Exit with success
       if (result.errors.length === 0) {

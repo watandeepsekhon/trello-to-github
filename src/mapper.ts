@@ -138,7 +138,7 @@ export class InteractiveMapper {
   static async confirmMappings(
     mappings: ListMapping[],
     epicStrategy: EpicStrategy
-  ): Promise<boolean> {
+  ): Promise<{ confirmed: boolean; saveConfig: boolean }> {
     console.log('\n📊 Import Summary\n');
 
     const mapped = mappings.filter(m => m.githubColumn);
@@ -169,31 +169,41 @@ export class InteractiveMapper {
       console.log('');
     }
 
-    const { confirm } = await inquirer.prompt<{ confirm: boolean }>([
+    const answers = await inquirer.prompt<{ confirm: boolean; save: boolean }>([
       {
         type: 'confirm',
         name: 'confirm',
         message: 'Proceed with this configuration?',
         default: true,
       },
-    ]);
-
-    return confirm;
-  }
-
-  /**
-   * Ask if user wants to save configuration
-   */
-  static async askToSaveConfig(): Promise<boolean> {
-    const { save } = await inquirer.prompt<{ save: boolean }>([
       {
         type: 'confirm',
         name: 'save',
         message: 'Save this configuration for future imports?',
-        default: false,
+        default: true,
+        when: (answers) => answers.confirm,
       },
     ]);
 
-    return save;
+    return {
+      confirmed: answers.confirm,
+      saveConfig: answers.save || false,
+    };
+  }
+
+  /**
+   * Ask if user wants to use saved configuration
+   */
+  static async askToUseSavedConfig(): Promise<boolean> {
+    const { use } = await inquirer.prompt<{ use: boolean }>([
+      {
+        type: 'confirm',
+        name: 'use',
+        message: 'Found a saved configuration. Would you like to use it?',
+        default: true,
+      },
+    ]);
+
+    return use;
   }
 }

@@ -109,12 +109,12 @@ export class TrelloParser {
     const comments: TrelloComment[] = [];
 
     for (const action of this.board.actions) {
-      if (action.type === 'commentCard' && action.data.card?.id === card.id) {
+      if (action.type === 'commentCard' && (action.data as any).card?.id === card.id) {
         const author = action.memberCreator?.fullName
           || action.memberCreator?.username
           || 'Unknown';
 
-        const text = typeof action.data.text === 'string' ? action.data.text : '';
+        const text = typeof (action.data as any).text === 'string' ? (action.data as any).text : '';
 
         comments.push({
           id: action.id,
