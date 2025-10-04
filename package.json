@@ -1,0 +1,42 @@
+{
+  "name": "trello-to-github",
+  "version": "0.1.0",
+  "description": "A CLI tool to migrate Trello boards to GitHub Projects",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "trello-to-github": "./bin/trello-to-github.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node --loader ts-node/esm src/cli.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "trello",
+    "github",
+    "migration",
+    "import",
+    "cli",
+    "project-management"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "execa": "^9.5.2",
+    "inquirer": "^12.3.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^22.10.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
