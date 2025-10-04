@@ -12,6 +12,7 @@ A CLI tool to migrate Trello boards to GitHub Projects with full control over co
 - 🔍 **Dry Run Mode** - Preview changes before applying them
 - 📊 **Detailed Statistics** - View board stats and structure before importing
 - 🗺️ **Mapping File** - Generate JSON mapping between Trello cards and GitHub issues
+- 💾 **Config Saving** - Save your configuration and reuse it if the import fails
 
 ## Prerequisites
 
@@ -121,6 +122,21 @@ If you mark lists as Epics, choose how to represent them:
 
 - **Custom Field** - Adds an "Epic" field to your GitHub Project
 - **Parent/Child Issues** - Creates parent issues with task lists linking to child issues
+
+### 6. Configuration Saving
+
+After you confirm your mappings, you'll be asked if you want to save the configuration:
+
+```
+? Save this configuration for future imports? (Y/n)
+```
+
+If you save it, the next time you run the same import (same Trello file + GitHub repo), you'll be prompted to reuse the saved configuration. This is especially useful if:
+- The import fails and you need to retry
+- You're testing with `--dry-run` first
+- You want to re-import the same board structure
+
+Saved configs are stored in `~/.trello-to-github/configs.json`
 
 ## What Gets Imported
 
@@ -234,8 +250,10 @@ npm run build
 ### Run Locally
 
 ```bash
-npm start import <file> --repo owner/repo
+npm start -- import <file> --repo owner/repo
 ```
+
+**Note:** The `--` after `npm start` is required to pass arguments to the script.
 
 ### Watch Mode
 
