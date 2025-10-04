@@ -87,7 +87,15 @@ trello-to-github import your-export.json --repo owner/repo
 ```bash
 trello-to-github import your-export.json \
   --repo owner/repo \
-  --project "My Project Name"
+  --project https://github.com/orgs/myorg/projects/1
+```
+
+Or for user-owned projects:
+
+```bash
+trello-to-github import your-export.json \
+  --repo owner/repo \
+  --project https://github.com/users/myusername/projects/1
 ```
 
 #### Dry Run (Preview Only)
@@ -175,7 +183,7 @@ trello-to-github import trello-export.json --repo myorg/myrepo
 ```bash
 trello-to-github import trello-export.json \
   --repo myorg/myrepo \
-  --project "Product Roadmap"
+  --project https://github.com/orgs/myorg/projects/2
 
 # During interactive setup:
 # - Mark "Epic: Authentication" as Epic container
@@ -223,9 +231,16 @@ Error: GitHub CLI is not authenticated
 
 The tool includes automatic delays between API calls to avoid rate limiting. For very large boards (100+ cards), expect the import to take several minutes.
 
-### Project Not Found
+### Project Issues
 
-If you specify `--project` and the project doesn't exist, the tool will create it automatically.
+**Using an existing project:**
+- Provide the full project URL: `--project https://github.com/orgs/myorg/projects/1`
+- The project can be owned by a different org/user than the repository
+- You need access to the project to add issues to it
+
+**Creating a new project:**
+- Currently not supported - projects must be created manually first
+- Create your project on GitHub, then provide its URL to the tool
 
 ### Label Colors Not Matching
 

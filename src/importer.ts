@@ -11,7 +11,7 @@ export class TrelloImporter {
 
   constructor(parser: TrelloParser, config: ImportConfig) {
     this.parser = parser;
-    this.github = new GitHubClient(config.githubRepo);
+    this.github = new GitHubClient(config.githubRepo, config.projectOwner);
     this.config = config;
   }
 
@@ -52,7 +52,8 @@ export class TrelloImporter {
     if (this.config.githubProject && !this.config.dryRun) {
       console.log(chalk.cyan('Setting up GitHub Project...'));
       projectNumber = await this.github.getOrCreateProject(
-        this.config.githubProject
+        this.config.githubProject,
+        this.config.projectOwner
       );
       console.log(chalk.green(`✓ Project ready: #${projectNumber}\n`));
     }
@@ -204,7 +205,9 @@ export class TrelloImporter {
 
     // Add to project if specified
     if (projectNumber) {
-      await this.github.addIssueToProject(projectNumber, issue.url);
+      const itemId = await this.github.addIssueToProject(projectNumber, issue.url);
+      // Set status to "Backlog" or similar default for epic parent issues
+      await this.github.setProjectItemStatus(projectNumber, issue.url, 'Backlog', itemId);
     }
 
     // Now create child issues and link them
@@ -272,8 +275,8 @@ export class TrelloImporter {
 
     // Add to project if specified
     if (projectNumber) {
-      await this.github.addIssueToProject(projectNumber, issue.url);
-      await this.github.setProjectItemStatus(projectNumber, issue.url, status);
+      const itemId = await this.github.addIssueToProject(projectNumber, issue.url);
+      await this.github.setProjectItemStatus(projectNumber, issue.url, status, itemId);
     }
 
     // Import comments

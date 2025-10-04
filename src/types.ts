@@ -103,6 +103,7 @@ export interface ImportConfig {
   trelloFilePath: string;
   githubRepo: string; // format: "owner/repo"
   githubProject?: string; // Project name or number
+  projectOwner?: string; // Project owner (if different from repo owner)
   listMappings: ListMapping[];
   epicStrategy: EpicStrategy;
   dryRun: boolean;

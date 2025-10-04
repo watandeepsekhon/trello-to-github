@@ -9,9 +9,14 @@ export interface GitHubIssue {
 
 export class GitHubClient {
   private repo: string;
+  private projectOwner?: string;
+  private projectId?: string;
+  private statusFieldId?: string;
+  private statusFieldOptions?: Map<string, string>; // status name -> option ID
 
-  constructor(repo: string) {
+  constructor(repo: string, projectOwner?: string) {
     this.repo = repo;
+    this.projectOwner = projectOwner;
   }
 
   /**
@@ -44,8 +49,6 @@ export class GitHubClient {
       options.title,
       '--body',
       options.body,
-      '--json',
-      'number,url,title',
     ];
 
     if (options.labels && options.labels.length > 0) {
@@ -57,12 +60,21 @@ export class GitHubClient {
     }
 
     const { stdout } = await execa('gh', args);
-    const result = JSON.parse(stdout);
+
+    // Parse the output URL from the response
+    // gh issue create returns a URL like: https://github.com/owner/repo/issues/123
+    const urlMatch = stdout.match(/https:\/\/github\.com\/[^\/]+\/[^\/]+\/issues\/(\d+)/);
+    if (!urlMatch) {
+      throw new Error(`Failed to parse issue URL from gh output: ${stdout}`);
+    }
+
+    const url = urlMatch[0];
+    const number = parseInt(urlMatch[1], 10);
 
     return {
-      number: result.number,
-      url: result.url,
-      title: result.title,
+      number,
+      url,
+      title: options.title,
     };
   }
 
@@ -106,62 +118,128 @@ export class GitHubClient {
   /**
    * Get or create a GitHub Project (v2)
    */
-  async getOrCreateProject(projectName: string): Promise<string> {
-    try {
-      // List projects and find matching one
-      const { stdout } = await execa('gh', [
-        'project',
-        'list',
-        '--owner',
-        this.repo.split('/')[0],
-        '--format',
-        'json',
-      ]);
+  async getOrCreateProject(projectNumber: string, projectOwner?: string): Promise<string> {
+    // Fetch project metadata including field information
+    await this.initializeProjectMetadata(projectNumber, projectOwner);
+    return projectNumber;
+  }
 
-      const projects = JSON.parse(stdout);
-      const existing = projects.projects?.find(
-        (p: any) => p.title === projectName
-      );
+  /**
+   * Initialize project metadata (ID, field IDs, status options)
+   */
+  private async initializeProjectMetadata(projectNumber: string, projectOwner?: string): Promise<void> {
+    const owner = projectOwner || this.repo.split('/')[0];
 
-      if (existing) {
-        return existing.number.toString();
+    const query = `
+      query($owner: String!, $number: Int!) {
+        organization(login: $owner) {
+          projectV2(number: $number) {
+            id
+            fields(first: 20) {
+              nodes {
+                ... on ProjectV2SingleSelectField {
+                  id
+                  name
+                  options {
+                    id
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
       }
+    `;
 
-      // Create new project
-      const { stdout: createOutput } = await execa('gh', [
-        'project',
-        'create',
-        '--owner',
-        this.repo.split('/')[0],
-        '--title',
-        projectName,
-        '--format',
-        'json',
+    try {
+      const { stdout } = await execa('gh', [
+        'api', 'graphql',
+        '-f', `query=${query}`,
+        '-F', `owner=${owner}`,
+        '-F', `number=${projectNumber}`
       ]);
 
-      const newProject = JSON.parse(createOutput);
-      return newProject.number.toString();
+      const response = JSON.parse(stdout);
+      const project = response.data?.organization?.projectV2;
+
+      if (!project) {
+        // Try as user project instead of org
+        const userQuery = query.replace('organization', 'user');
+        const { stdout: userStdout } = await execa('gh', [
+          'api', 'graphql',
+          '-f', `query=${userQuery}`,
+          '-F', `owner=${owner}`,
+          '-F', `number=${projectNumber}`
+        ]);
+        const userResponse = JSON.parse(userStdout);
+        const userProject = userResponse.data?.user?.projectV2;
+
+        if (userProject) {
+          this.projectId = userProject.id;
+          this.parseProjectFields(userProject.fields.nodes);
+        }
+      } else {
+        this.projectId = project.id;
+        this.parseProjectFields(project.fields.nodes);
+      }
     } catch (error) {
-      throw new Error(`Failed to get or create project: ${error}`);
+      console.warn('Could not fetch project metadata for automatic status setting');
     }
   }
 
   /**
-   * Add an issue to a project
+   * Parse project fields to find Status field and its options
+   */
+  private parseProjectFields(fields: any[]): void {
+    for (const field of fields) {
+      if (field.name === 'Status' && field.options) {
+        this.statusFieldId = field.id;
+        this.statusFieldOptions = new Map(
+          field.options.map((opt: any) => [opt.name, opt.id])
+        );
+        break;
+      }
+    }
+  }
+
+  /**
+   * Add an issue to a project and return the project item ID
    */
   async addIssueToProject(
     projectNumber: string,
     issueUrl: string
-  ): Promise<void> {
-    await execa('gh', [
-      'project',
-      'item-add',
-      projectNumber,
-      '--owner',
-      this.repo.split('/')[0],
-      '--url',
-      issueUrl,
-    ]);
+  ): Promise<string | null> {
+    const owner = this.projectOwner || this.repo.split('/')[0];
+
+    try {
+      const { stdout } = await execa('gh', [
+        'project',
+        'item-add',
+        projectNumber,
+        '--owner',
+        owner,
+        '--url',
+        issueUrl,
+        '--format',
+        'json'
+      ]);
+
+      const response = JSON.parse(stdout);
+      return response.id || null;
+    } catch (error) {
+      // Fallback: try without --format json for older gh versions
+      await execa('gh', [
+        'project',
+        'item-add',
+        projectNumber,
+        '--owner',
+        owner,
+        '--url',
+        issueUrl,
+      ]);
+      return null;
+    }
   }
 
   /**
@@ -170,27 +248,116 @@ export class GitHubClient {
   async setProjectItemStatus(
     projectNumber: string,
     issueUrl: string,
-    status: string
+    status: string,
+    itemId?: string | null
   ): Promise<void> {
+    // Check if we have all the required metadata
+    if (!this.projectId || !this.statusFieldId || !this.statusFieldOptions) {
+      return; // Can't set status without metadata
+    }
+
+    // Get the status option ID
+    const statusOptionId = this.statusFieldOptions.get(status);
+    if (!statusOptionId) {
+      console.warn(`Status "${status}" not found in project. Available: ${Array.from(this.statusFieldOptions.keys()).join(', ')}`);
+      return;
+    }
+
+    // If we don't have the item ID, we need to fetch it
+    if (!itemId) {
+      itemId = await this.getProjectItemId(issueUrl);
+      if (!itemId) {
+        console.warn(`Could not find project item ID for ${issueUrl}`);
+        return;
+      }
+    }
+
+    // Update the status using GraphQL
+    const mutation = `
+      mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+        updateProjectV2ItemFieldValue(input: {
+          projectId: $projectId
+          itemId: $itemId
+          fieldId: $fieldId
+          value: {
+            singleSelectOptionId: $optionId
+          }
+        }) {
+          projectV2Item {
+            id
+          }
+        }
+      }
+    `;
+
     try {
       await execa('gh', [
-        'project',
-        'item-edit',
-        '--project-number',
-        projectNumber,
-        '--owner',
-        this.repo.split('/')[0],
-        '--url',
-        issueUrl,
-        '--field-name',
-        'Status',
-        '--field-value',
-        status,
+        'api', 'graphql',
+        '-f', `query=${mutation}`,
+        '-F', `projectId=${this.projectId}`,
+        '-F', `itemId=${itemId}`,
+        '-F', `fieldId=${this.statusFieldId}`,
+        '-F', `optionId=${statusOptionId}`
       ]);
     } catch (error) {
-      // Non-fatal: status field might not exist yet
       console.warn(`Could not set status to "${status}": ${error}`);
     }
+  }
+
+  /**
+   * Get the project item ID for an issue URL
+   */
+  private async getProjectItemId(issueUrl: string): Promise<string | null> {
+    if (!this.projectId) return null;
+
+    // Extract issue node ID from URL
+    const issueMatch = issueUrl.match(/\/issues\/(\d+)$/);
+    if (!issueMatch) return null;
+
+    const issueNumber = parseInt(issueMatch[1], 10);
+    const [owner, repo] = this.repo.split('/');
+
+    const query = `
+      query($owner: String!, $repo: String!, $issueNumber: Int!, $projectId: ID!) {
+        repository(owner: $owner, name: $repo) {
+          issue(number: $issueNumber) {
+            projectItems(first: 10) {
+              nodes {
+                id
+                project {
+                  id
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const { stdout } = await execa('gh', [
+        'api', 'graphql',
+        '-f', `query=${query}`,
+        '-F', `owner=${owner}`,
+        '-F', `repo=${repo}`,
+        '-F', `issueNumber=${issueNumber}`,
+        '-F', `projectId=${this.projectId}`
+      ]);
+
+      const response = JSON.parse(stdout);
+      const projectItems = response.data?.repository?.issue?.projectItems?.nodes || [];
+
+      // Find the item that belongs to our project
+      for (const item of projectItems) {
+        if (item.project?.id === this.projectId) {
+          return item.id;
+        }
+      }
+    } catch (error) {
+      console.warn('Could not fetch project item ID');
+    }
+
+    return null;
   }
 
   /**

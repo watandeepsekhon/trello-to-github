@@ -20,7 +20,7 @@ program
   .description('Import a Trello board export to GitHub')
   .argument('<trello-file>', 'Path to Trello JSON export file')
   .requiredOption('-r, --repo <owner/repo>', 'GitHub repository (owner/repo)')
-  .option('-p, --project <name>', 'GitHub Project name (will be created if it doesn\'t exist)')
+  .option('-p, --project <url>', 'GitHub Project URL (e.g. https://github.com/orgs/myorg/projects/1)')
   .option('--dry-run', 'Preview the import without making changes', false)
   .action(async (trelloFile: string, options: any) => {
     try {
@@ -86,11 +86,26 @@ program
         });
       }
 
+      // Parse project URL if provided
+      let projectOwner: string | undefined;
+      let projectNumber: string | undefined;
+
+      if (options.project) {
+        const projectMatch = options.project.match(/github\.com\/(orgs|users)\/([^/]+)\/projects\/(\d+)/);
+        if (projectMatch) {
+          projectOwner = projectMatch[2];
+          projectNumber = projectMatch[3];
+        } else {
+          throw new Error('Invalid project URL. Expected format: https://github.com/orgs/myorg/projects/1');
+        }
+      }
+
       // Create import config
       const config: ImportConfig = {
         trelloFilePath: trelloFile,
         githubRepo: options.repo,
-        githubProject: options.project,
+        githubProject: projectNumber,
+        projectOwner,
         listMappings,
         epicStrategy,
         dryRun: options.dryRun,
