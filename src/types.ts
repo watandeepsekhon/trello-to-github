@@ -107,6 +107,13 @@ export interface ImportConfig {
   listMappings: ListMapping[];
   epicStrategy: EpicStrategy;
   dryRun: boolean;
+  resume?: boolean; // Skip already imported cards
+  onlyEpics?: boolean; // Only import epic cards
+}
+
+export interface Checkpoint {
+  importedCards: Set<string>; // Trello card IDs that have been imported
+  mapping: Record<string, string>; // Trello card ID -> GitHub issue number
 }
 
 export interface ImportResult {

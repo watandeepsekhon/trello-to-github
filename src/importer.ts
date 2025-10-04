@@ -1,13 +1,16 @@
 import chalk from 'chalk';
-import { writeFile } from 'fs/promises';
+import { writeFile, readFile } from 'fs/promises';
+import { existsSync } from 'fs';
 import { TrelloParser } from './parser.js';
 import { GitHubClient } from './github-client.js';
-import type { ImportConfig, ImportResult, ListMapping, TrelloCard } from './types.js';
+import type { ImportConfig, ImportResult, ListMapping, TrelloCard, Checkpoint } from './types.js';
 
 export class TrelloImporter {
   private parser: TrelloParser;
   private github: GitHubClient;
   private config: ImportConfig;
+  private checkpointFile = 'trello-import-checkpoint.json';
+  private checkpoint: Checkpoint = { importedCards: new Set(), mapping: {} };
 
   constructor(parser: TrelloParser, config: ImportConfig) {
     this.parser = parser;
@@ -26,6 +29,13 @@ export class TrelloImporter {
       mapping: {},
       errors: [],
     };
+
+    // Load checkpoint if resuming
+    if (this.config.resume) {
+      await this.loadCheckpoint();
+      result.mapping = { ...this.checkpoint.mapping };
+      console.log(chalk.cyan(`\n📍 Resuming from checkpoint (${this.checkpoint.importedCards.size} cards already imported)\n`));
+    }
 
     console.log(chalk.bold('\n🚀 Starting Trello to GitHub Import\n'));
 
@@ -47,6 +57,12 @@ export class TrelloImporter {
       console.log(chalk.green(`✓ Created ${board.labels.length} labels\n`));
     }
 
+    // Create epic label if we have epic lists
+    const hasEpics = this.config.listMappings.some(m => m.isEpic);
+    if (hasEpics && !this.config.dryRun) {
+      await this.github.createLabel('epic', '8B5CF6'); // Purple color
+    }
+
     // Get or create project if specified
     let projectNumber: string | undefined;
     if (this.config.githubProject && !this.config.dryRun) {
@@ -59,12 +75,14 @@ export class TrelloImporter {
     }
 
     // Process regular (non-epic) cards
-    const regularMappings = this.config.listMappings.filter(
-      m => m.githubColumn && !m.isEpic
-    );
+    if (!this.config.onlyEpics) {
+      const regularMappings = this.config.listMappings.filter(
+        m => m.githubColumn && !m.isEpic
+      );
 
-    for (const mapping of regularMappings) {
-      await this.processListCards(mapping, projectNumber, result);
+      for (const mapping of regularMappings) {
+        await this.processListCards(mapping, projectNumber, result);
+      }
     }
 
     // Process epic cards
@@ -111,8 +129,17 @@ export class TrelloImporter {
     console.log(chalk.gray(`   ${cards.length} card(s) to import\n`));
 
     for (const card of cards) {
+      // Skip if already imported
+      if (this.checkpoint.importedCards.has(card.id)) {
+        console.log(chalk.gray(`   ⏭️  Skipping "${card.name}" (already imported)`));
+        result.cardsSkipped++;
+        continue;
+      }
+
       try {
         await this.importCard(card, mapping.githubColumn!, projectNumber, result);
+        this.checkpoint.importedCards.add(card.id);
+        await this.saveCheckpoint();
       } catch (error: any) {
         const errorMsg = `Failed to import "${card.name}": ${error.message}`;
         result.errors.push(errorMsg);
@@ -153,6 +180,13 @@ export class TrelloImporter {
       } else {
         // Import as regular issues with epic field
         for (const card of cards) {
+          // Skip if already imported
+          if (this.checkpoint.importedCards.has(card.id)) {
+            console.log(chalk.gray(`   ⏭️  Skipping "${card.name}" (already imported)`));
+            result.cardsSkipped++;
+            continue;
+          }
+
           try {
             await this.importCard(
               card,
@@ -161,6 +195,8 @@ export class TrelloImporter {
               result,
               epicMapping.trelloListName // Epic name
             );
+            this.checkpoint.importedCards.add(card.id);
+            await this.saveCheckpoint();
           } catch (error: any) {
             const errorMsg = `Failed to import epic card "${card.name}": ${error.message}`;
             result.errors.push(errorMsg);
@@ -212,6 +248,13 @@ export class TrelloImporter {
 
     // Now create child issues and link them
     for (const card of cards) {
+      // Skip if already imported
+      if (this.checkpoint.importedCards.has(card.id)) {
+        console.log(chalk.gray(`   ⏭️  Skipping "${card.name}" (already imported)`));
+        result.cardsSkipped++;
+        continue;
+      }
+
       try {
         const childIssue = await this.importCard(
           card,
@@ -221,6 +264,8 @@ export class TrelloImporter {
           undefined,
           issue.number
         );
+        this.checkpoint.importedCards.add(card.id);
+        await this.saveCheckpoint();
       } catch (error: any) {
         result.errors.push(`Failed to import child card "${card.name}": ${error.message}`);
       }
@@ -272,6 +317,7 @@ export class TrelloImporter {
     result.cardsImported++;
     result.issuesCreated.push(issue.url);
     result.mapping[card.id] = issue.number.toString();
+    this.checkpoint.mapping[card.id] = issue.number.toString();
 
     // Add to project if specified
     if (projectNumber) {
@@ -289,9 +335,41 @@ export class TrelloImporter {
         await this.github.addComment(issue.number, commentBody);
       }
     }
+  }
 
-    // Small delay to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 500));
+  /**
+   * Load checkpoint from file
+   */
+  private async loadCheckpoint(): Promise<void> {
+    if (!existsSync(this.checkpointFile)) {
+      return;
+    }
+
+    try {
+      const data = await readFile(this.checkpointFile, 'utf-8');
+      const saved = JSON.parse(data);
+      this.checkpoint.importedCards = new Set(saved.importedCards || []);
+      this.checkpoint.mapping = saved.mapping || {};
+    } catch (error) {
+      console.warn(chalk.yellow('Could not load checkpoint file, starting fresh'));
+    }
+  }
+
+  /**
+   * Save checkpoint to file
+   */
+  private async saveCheckpoint(): Promise<void> {
+    if (this.config.dryRun) return;
+
+    try {
+      const data = {
+        importedCards: Array.from(this.checkpoint.importedCards),
+        mapping: this.checkpoint.mapping,
+      };
+      await writeFile(this.checkpointFile, JSON.stringify(data, null, 2));
+    } catch (error) {
+      // Non-fatal
+    }
   }
 
   /**

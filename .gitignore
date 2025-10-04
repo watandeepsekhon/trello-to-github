@@ -11,3 +11,5 @@ coverage/
 *.swp
 *.swo
 *~
+trello-github-mapping.json
+trello-import-checkpoint.json

@@ -13,6 +13,8 @@ A CLI tool to migrate Trello boards to GitHub Projects with full control over co
 - 📊 **Detailed Statistics** - View board stats and structure before importing
 - 🗺️ **Mapping File** - Generate JSON mapping between Trello cards and GitHub issues
 - 💾 **Config Saving** - Save your configuration and reuse it if the import fails
+- 📍 **Checkpoint/Resume** - Automatically saves progress and resume from where you left off if import fails
+- ⚡ **Fast Import** - No artificial rate limiting delays
 
 ## Prerequisites
 
@@ -104,6 +106,26 @@ trello-to-github import your-export.json \
 trello-to-github import your-export.json \
   --repo owner/repo \
   --dry-run
+```
+
+#### Import Only Epics
+
+```bash
+trello-to-github import your-export.json \
+  --repo owner/repo \
+  --project https://github.com/orgs/myorg/projects/1 \
+  --only-epics
+```
+
+#### Resume from Checkpoint
+
+If an import fails partway through, you can resume from where it left off:
+
+```bash
+trello-to-github import your-export.json \
+  --repo owner/repo \
+  --project https://github.com/orgs/myorg/projects/1 \
+  --resume
 ```
 
 ### 4. Interactive Configuration
@@ -216,6 +238,12 @@ After a successful import, the tool creates:
     "trello-card-id-456": "43"
   }
   ```
+
+- **trello-import-checkpoint.json** - Checkpoint file for resuming failed imports
+  - Automatically created during import
+  - Tracks which cards have been successfully imported
+  - Use with `--resume` flag to skip already imported cards
+  - Delete this file to start a fresh import
 
 ## Troubleshooting
 

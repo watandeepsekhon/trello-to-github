@@ -22,6 +22,8 @@ program
   .requiredOption('-r, --repo <owner/repo>', 'GitHub repository (owner/repo)')
   .option('-p, --project <url>', 'GitHub Project URL (e.g. https://github.com/orgs/myorg/projects/1)')
   .option('--dry-run', 'Preview the import without making changes', false)
+  .option('--resume', 'Resume from checkpoint (skip already imported cards)', false)
+  .option('--only-epics', 'Only import epic cards', false)
   .action(async (trelloFile: string, options: any) => {
     try {
       console.log(chalk.bold.cyan('\n🎯 Trello to GitHub Importer\n'));
@@ -109,6 +111,8 @@ program
         listMappings,
         epicStrategy,
         dryRun: options.dryRun,
+        resume: options.resume,
+        onlyEpics: options.onlyEpics,
       };
 
       // Run import
