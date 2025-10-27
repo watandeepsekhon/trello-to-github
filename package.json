@@ -21,8 +21,12 @@
     "cli",
     "project-management"
   ],
-  "author": "",
+  "author": "Watandeep Sekhon",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/watandeepsekhon/trello-to-github.git"
+  },
   "dependencies": {
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
